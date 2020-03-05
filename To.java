@@ -1,68 +1,13 @@
-package temp;
-
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Observable;
-import java.util.Observer;
-import java.util.concurrent.Callable;
+import java.lang.reflect.*;
+import java.util.*;
+import java.util.concurrent.*;
 
 /**
- The "new To" loop provides a looping alternative that is often slightly more
- concise than the for loop.  It allows you to replace
-<pre>
-    for (Object x : new Integer[] {8,6,7,5,3,0,9}) { print("Jenny:" + x); };
-</pre>
- * with 
-<pre>
-    new To(8,6,7,5,3,0,9) {{ print("Jenny:" + x); }};
-</pre>
-<p>
-Unlike, the standard for loop, the new To loop also accepts IteratorS and EnumerationS
-<pre>
-    new To(System.getProperties().keys()) {{ print(x); }};
-</pre>
-A To is an object that implements several interfaces, so that adapters aren't
-required in order use it in a variety of ways.  Because it is a Collection,
-it can be executed again later, along with additional code, using a for loop.
-<pre>
-    for (Object x : to) {
-        // do additional stuff to x, here
-    }
-</pre>
-If no additional action is to be taken on the subsequent runs, it can simply
-be run as a Runnable, or called as a Callable.  No matter how the loop is executed
-again, any registered ObserverS are notified.  Thus, in addition to being nested
-like for loops, To loops can be wired together for interleaved execution.
-
-<pre>
-    To tick = new To(1,2,3) {{ print("tick:" + x); }};
-    To tock = new To(4,5,6) {{ print("tock:" + x); }};
-
-    tick.addObserver(tock);
-
-    tick.run();
-</pre>
- *
- * <p>
- Unfortunately, despite these advantages, the current implementation
- has several glaring limitations.
- * <ul>
- * <li> Special care must be taken to handle empty loops
- * <li> Only supports To loops that are static classes
- * <li> It has much more overhead and is much slower than an equivalent for loop
- * </ul>
- * 
+ See docs and examples at https://github.com/curtcox/Loopy-Java/
  */
 public class To<X>
-    extends Observable
-    implements Iterator<X>, Collection<X>, Enumeration<X>, Runnable, Callable, Observer
+        extends Observable
+        implements Iterator<X>, Collection<X>, Enumeration<X>, Runnable, Callable, Observer
 {
 
     /**
@@ -156,9 +101,9 @@ public class To<X>
         // This is the constructor our subclass will use.
         if (xs.length > 1) {
             for (int i=0; i<xs.length-1; i++) {
-                X arg = (X) xs[i];
+                X arg = xs[i];
                 args.add(arg);
-                newInstanceWithArg(arg);
+                newInstanceWithArg(this,arg);
             }
             x = xs[xs.length - 1];
             args.add(x);
@@ -205,7 +150,7 @@ public class To<X>
         for (; i.hasNext(); arg = (X) i.next()) {
             args.add(arg);
             if (i.hasNext()) {
-                newInstanceWithArg(arg);
+                newInstanceWithArg(this,arg);
             }
         }
         args.add(arg);
@@ -251,7 +196,7 @@ public class To<X>
         for (; i.hasNext(); arg = i.next()) {
             args.add(arg);
             if (i.hasNext()) {
-                newInstanceWithArg(arg);
+                newInstanceWithArg(this,arg);
             }
         }
         args.add(arg);
@@ -297,7 +242,7 @@ public class To<X>
         for (; e.hasMoreElements(); arg = e.nextElement()) {
             args.add(arg);
             if (e.hasMoreElements()) {
-                newInstanceWithArg(arg);
+                newInstanceWithArg(this,arg);
             }
         }
         args.add(arg);
@@ -310,15 +255,15 @@ public class To<X>
 
     /**
      * Use the same constructor that is invoking us, to create a new instance.
-     * We do this in order to run whatever code in the subclass instance
+     * We do this in order to run whatever code is in the subclass instance
      * initializer again.  It can refer to x, which will have the given value.
      */
-    private void newInstanceWithArg(Object x) {
+    private void newInstanceWithArg(To to,Object x) {
         try {
-            newInstanceWithArgWrapper0(x);
+            newInstanceWithArgWrapper0(to,x);
         } catch (IllegalArgumentException e) {
             String message = x + " not valid for constructor " + extending + " taking "+ Arrays.asList(formals);
-            throw new IllegalArgumentException(message);
+            throw new IllegalArgumentException(message,e);
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {
@@ -327,20 +272,22 @@ public class To<X>
         }
     }
 
-    private To newInstance0(Object x)
-        throws ClassNotFoundException, InstantiationException, IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+    private To newInstanceWithArgWrapper0(To to,Object x)
+            throws InstantiationException, IllegalAccessException, IllegalArgumentException, InvocationTargetException
+    {
+        Field[] declaredFields = to.getClass().getDeclaredFields();
         Object[] params = new Object[formals.length];
-        params[0] = x;
-        return (To) extending.newInstance(params);
-    }
-
-    private To newInstanceWithArgWrapper0(Object x)
-        throws ClassNotFoundException, InstantiationException, IllegalAccessException, IllegalArgumentException, InvocationTargetException {
-        Object[] params = new Object[formals.length];
-        params[0] = new ArgWrapper(x,extending,formals);
-        if (extending.isVarArgs()) {
-            params = new Object[] {params};
+        boolean hasThis = declaredFields.length==1;
+        boolean varArgs = extending.isVarArgs();
+        ArgWrapper wrapped = new ArgWrapper(x,extending,formals);
+        Object arg = varArgs ? new Object[] {wrapped} : wrapped;
+        if (hasThis) {
+            params[0] = declaredFields[0].get(to);
+            params[1] = arg;
+        } else {
+            params[0] = arg;
         }
+
         return (To) extending.newInstance(params);
     }
 
@@ -375,8 +322,8 @@ public class To<X>
 
     private static boolean isExtendingClass(String c) {
         return  c !=null &&
-              ! c.equals(To.class.getName()) &&
-              ! c.equals(Thread.class.getName());
+                ! c.equals(To.class.getName()) &&
+                ! c.equals(Thread.class.getName());
     }
 
     /*
@@ -393,7 +340,7 @@ public class To<X>
     final public       void remove() { iterator.remove(); }
     public X                  next() {
         X x = (X) iterator.next();
-        newInstanceWithArg(x);
+        newInstanceWithArg(this,x);
         this.notifyObservers(x);
         return x;
     }
@@ -403,7 +350,7 @@ public class To<X>
      */
     public void run() {
         for (Object x : args) {
-            newInstanceWithArg(x);
+            newInstanceWithArg(this,x);
         }
     }
 
@@ -485,67 +432,4 @@ public class To<X>
         next();
     }
 
-    /**
-     * @param args the command line arguments
-     * @throws Exception
-     */
-    public static void main(String[] args) throws Exception {
-        List list1 = new ArrayList();
-        list1.add(1);
-
-        To iterable1 = new To(list1)                             {{print("iterable:" +x); }};
-        To iterator1 = new To(list1.iterator())                  {{print("iterator:" +x); }};
-        To enumeration1 = new To(Collections.enumeration(list1)) {{print("enumeration:" +x); }};
-
-        List list2 = new ArrayList();
-        list2.add(1);
-        list2.add(2);
-
-        To iterable2 = new To(list2)                             {{print("iterable:" +x); }};
-        To iterator2 = new To(list2.iterator())                  {{print("iterator:" +x); }};
-        To enumeration2 = new To(Collections.enumeration(list2)) {{print("enumeration:" +x); }};
-
-        new To("bar","baz") {{ print("2:" +x);  }};
-        new To(1,2,3)       {{ print("3:" +x);  }};
-        new To(1,2,3,4)     {{ print("4:" + x); }};
-        new To(8,6,7,5,3,0,9)   {{ print("Jenny:" + x); }};
-        for (Object x : Arrays.asList(new Integer[] {8,6,7,5,3,0,9})) { print("Jenny:" + x); };
-
-        new To(System.getProperties().keys()) {{ print(x); }};
-
-        for (Object o :new To(1,2){}) {}
-
-        new To(iterable1,iterator1,enumeration1) {{
-           ((To)x).run();
-        }};
-        new To(iterable2,iterator2,enumeration2) {{
-           ((To)x).run();
-        }};
-
-        To<To> to = new To(iterable2,iterator2,enumeration2) {{
-           ((To)x).run();
-        }};
-
-        for (To x : to) {
-            for (Object y : x) {
-                print("In for " + y);
-            }
-        }
-
-        To tick = new To(1,2,3) {{ print("tick:" + x); }};
-        To tock = new To(4,5,6) {{ print("tock:" + x); }};
-
-        tick.addObserver(tock);
-
-        print("Convoluted");
-
-        tick.run();
-
-        print("Done");
-        System.exit(0);
-    }
-
-    static void print(Object x) {
-        System.out.println( x );
-    }
 }
